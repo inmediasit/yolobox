@@ -55,6 +55,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     # For terminfo compilation (Ghostty support)
     ncurses-bin \
+    # For dropping privileges in entrypoint
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 22 LTS
@@ -193,6 +195,24 @@ RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-
     printf '%s\n' \
     '#!/bin/bash' \
     '' \
+    '# Match yolo user UID/GID to the mounted project directory owner' \
+    '# so the container user can read/write host files without permission issues' \
+    'if [ -n "$YOLOBOX_PROJECT_PATH" ] && [ -d "$YOLOBOX_PROJECT_PATH" ]; then' \
+    '    HOST_UID=$(stat -c %u "$YOLOBOX_PROJECT_PATH")' \
+    '    HOST_GID=$(stat -c %g "$YOLOBOX_PROJECT_PATH")' \
+    '    CURRENT_UID=$(id -u yolo)' \
+    '    CURRENT_GID=$(id -g yolo)' \
+    '    if [ "$HOST_GID" != "$CURRENT_GID" ]; then' \
+    '        groupmod -o -g "$HOST_GID" yolo 2>/dev/null || true' \
+    '    fi' \
+    '    if [ "$HOST_UID" != "$CURRENT_UID" ]; then' \
+    '        usermod -o -u "$HOST_UID" yolo 2>/dev/null || true' \
+    '    fi' \
+    '    if [ "$HOST_UID" != "$CURRENT_UID" ] || [ "$HOST_GID" != "$CURRENT_GID" ]; then' \
+    '        chown -R yolo:yolo /home/yolo 2>/dev/null || true' \
+    '    fi' \
+    'fi' \
+    '' \
     '# Apple container workaround: files are in /host-files/ instead of separate mounts' \
     '# Check YOLOBOX_HOST_FILES env var for the mount location' \
     'HF="${YOLOBOX_HOST_FILES:-}"' \
@@ -202,48 +222,48 @@ RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-
     '    echo -e "\033[33m→ Copying host Claude config to container\033[0m" >&2' \
     'fi' \
     'if [ -d /host-claude/.claude ]; then' \
-    '    sudo rm -rf /home/yolo/.claude' \
-    '    sudo cp -a /host-claude/.claude /home/yolo/.claude' \
-    '    sudo chown -R yolo:yolo /home/yolo/.claude' \
+    '    rm -rf /home/yolo/.claude' \
+    '    cp -a /host-claude/.claude /home/yolo/.claude' \
+    '    chown -R yolo:yolo /home/yolo/.claude' \
     'fi' \
     'if [ -f /host-claude/.claude.json ]; then' \
-    '    sudo rm -f /home/yolo/.claude.json' \
-    '    sudo cp -a /host-claude/.claude.json /home/yolo/.claude.json' \
-    '    sudo chown yolo:yolo /home/yolo/.claude.json' \
+    '    rm -f /home/yolo/.claude.json' \
+    '    cp -a /host-claude/.claude.json /home/yolo/.claude.json' \
+    '    chown yolo:yolo /home/yolo/.claude.json' \
     'elif [ -f "$HF/claude/.claude.json" ]; then' \
-    '    sudo rm -f /home/yolo/.claude.json' \
-    '    sudo cp -a "$HF/claude/.claude.json" /home/yolo/.claude.json' \
-    '    sudo chown yolo:yolo /home/yolo/.claude.json' \
+    '    rm -f /home/yolo/.claude.json' \
+    '    cp -a "$HF/claude/.claude.json" /home/yolo/.claude.json' \
+    '    chown yolo:yolo /home/yolo/.claude.json' \
     'fi' \
     '# Copy Claude credentials from macOS Keychain (extracted by yolobox)' \
     'CREDS_FILE="/host-claude/.credentials.json"' \
     '[ ! -f "$CREDS_FILE" ] && [ -f "$HF/claude/.credentials.json" ] && CREDS_FILE="$HF/claude/.credentials.json"' \
     'if [ -f "$CREDS_FILE" ]; then' \
     '    mkdir -p /home/yolo/.claude' \
-    '    sudo cp -a "$CREDS_FILE" /home/yolo/.claude/.credentials.json' \
-    '    sudo chown yolo:yolo /home/yolo/.claude/.credentials.json' \
-    '    sudo chmod 600 /home/yolo/.claude/.credentials.json' \
+    '    cp -a "$CREDS_FILE" /home/yolo/.claude/.credentials.json' \
+    '    chown yolo:yolo /home/yolo/.claude/.credentials.json' \
+    '    chmod 600 /home/yolo/.claude/.credentials.json' \
     'fi' \
     '' \
     '# Copy Gemini config from host staging area if present' \
     'if [ -d /host-gemini/.gemini ]; then' \
     '    echo -e "\033[33m→ Copying host Gemini config to container\033[0m" >&2' \
-    '    sudo rm -rf /home/yolo/.gemini' \
-    '    sudo cp -a /host-gemini/.gemini /home/yolo/.gemini' \
-    '    sudo chown -R yolo:yolo /home/yolo/.gemini' \
+    '    rm -rf /home/yolo/.gemini' \
+    '    cp -a /host-gemini/.gemini /home/yolo/.gemini' \
+    '    chown -R yolo:yolo /home/yolo/.gemini' \
     'fi' \
     '' \
     '# Copy git config from host staging area if present' \
     'if [ -f /host-git/.gitconfig ]; then' \
     '    echo -e "\033[33m→ Copying host git config to container\033[0m" >&2' \
-    '    sudo rm -f /home/yolo/.gitconfig' \
-    '    sudo cp -a /host-git/.gitconfig /home/yolo/.gitconfig' \
-    '    sudo chown yolo:yolo /home/yolo/.gitconfig' \
+    '    rm -f /home/yolo/.gitconfig' \
+    '    cp -a /host-git/.gitconfig /home/yolo/.gitconfig' \
+    '    chown yolo:yolo /home/yolo/.gitconfig' \
     'elif [ -f "$HF/git/.gitconfig" ]; then' \
     '    echo -e "\033[33m→ Copying host git config to container\033[0m" >&2' \
-    '    sudo rm -f /home/yolo/.gitconfig' \
-    '    sudo cp -a "$HF/git/.gitconfig" /home/yolo/.gitconfig' \
-    '    sudo chown yolo:yolo /home/yolo/.gitconfig' \
+    '    rm -f /home/yolo/.gitconfig' \
+    '    cp -a "$HF/git/.gitconfig" /home/yolo/.gitconfig' \
+    '    chown yolo:yolo /home/yolo/.gitconfig' \
     'fi' \
     '' \
     '# Mark project directory as safe for git (ownership differs from container user)' \
@@ -258,8 +278,8 @@ RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-
     '[ ! -f "$CLAUDE_MD" ] && [ -f "$HF/agent-instructions/claude/CLAUDE.md" ] && CLAUDE_MD="$HF/agent-instructions/claude/CLAUDE.md"' \
     'if [ -f "$CLAUDE_MD" ]; then' \
     '    mkdir -p /home/yolo/.claude' \
-    '    sudo cp -a "$CLAUDE_MD" /home/yolo/.claude/CLAUDE.md' \
-    '    sudo chown yolo:yolo /home/yolo/.claude/CLAUDE.md' \
+    '    cp -a "$CLAUDE_MD" /home/yolo/.claude/CLAUDE.md' \
+    '    chown yolo:yolo /home/yolo/.claude/CLAUDE.md' \
     '    COPIED_AGENT_INSTRUCTIONS=1' \
     'fi' \
     '# Gemini: GEMINI.md' \
@@ -267,8 +287,8 @@ RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-
     '[ ! -f "$GEMINI_MD" ] && [ -f "$HF/agent-instructions/gemini/GEMINI.md" ] && GEMINI_MD="$HF/agent-instructions/gemini/GEMINI.md"' \
     'if [ -f "$GEMINI_MD" ]; then' \
     '    mkdir -p /home/yolo/.gemini' \
-    '    sudo cp -a "$GEMINI_MD" /home/yolo/.gemini/GEMINI.md' \
-    '    sudo chown -R yolo:yolo /home/yolo/.gemini' \
+    '    cp -a "$GEMINI_MD" /home/yolo/.gemini/GEMINI.md' \
+    '    chown -R yolo:yolo /home/yolo/.gemini' \
     '    COPIED_AGENT_INSTRUCTIONS=1' \
     'fi' \
     '# Codex: AGENTS.md' \
@@ -276,16 +296,16 @@ RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-
     '[ ! -f "$CODEX_MD" ] && [ -f "$HF/agent-instructions/codex/AGENTS.md" ] && CODEX_MD="$HF/agent-instructions/codex/AGENTS.md"' \
     'if [ -f "$CODEX_MD" ]; then' \
     '    mkdir -p /home/yolo/.codex' \
-    '    sudo cp -a "$CODEX_MD" /home/yolo/.codex/AGENTS.md' \
-    '    sudo chown -R yolo:yolo /home/yolo/.codex' \
+    '    cp -a "$CODEX_MD" /home/yolo/.codex/AGENTS.md' \
+    '    chown -R yolo:yolo /home/yolo/.codex' \
     '    COPIED_AGENT_INSTRUCTIONS=1' \
     'fi' \
     '# Copilot: agents/ directory' \
     'if [ -d /host-agent-instructions/copilot/agents ]; then' \
     '    mkdir -p /home/yolo/.copilot' \
-    '    sudo rm -rf /home/yolo/.copilot/agents' \
-    '    sudo cp -a /host-agent-instructions/copilot/agents /home/yolo/.copilot/agents' \
-    '    sudo chown -R yolo:yolo /home/yolo/.copilot' \
+    '    rm -rf /home/yolo/.copilot/agents' \
+    '    cp -a /host-agent-instructions/copilot/agents /home/yolo/.copilot/agents' \
+    '    chown -R yolo:yolo /home/yolo/.copilot' \
     '    COPIED_AGENT_INSTRUCTIONS=1' \
     'fi' \
     'if [ "$COPIED_AGENT_INSTRUCTIONS" = "1" ]; then' \
@@ -294,6 +314,7 @@ RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-
     '' \
     '# Ensure npm-global prefix dir exists (named volume may shadow /home/yolo)' \
     'mkdir -p /home/yolo/.npm-global' \
+    'chown yolo:yolo /home/yolo/.npm-global' \
     '' \
     '# Auto-trust project directory for Claude Code (this is yolobox after all)' \
     'if [ -n "$YOLOBOX_PROJECT_PATH" ]; then' \
@@ -308,10 +329,10 @@ RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-
     '    fi' \
     'fi' \
     '' \
-    'exec "$@"' \
+    '# Drop privileges and exec as yolo user' \
+    'exec gosu yolo "$@"' \
     > /usr/local/bin/yolobox-entrypoint.sh && \
     chmod +x /usr/local/bin/yolobox-entrypoint.sh
-USER yolo
 
 # Working directory is set by yolobox CLI to the actual project path
 
