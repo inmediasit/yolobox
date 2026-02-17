@@ -210,10 +210,10 @@ RUN mkdir -p /host-claude /host-gemini /host-git /host-agent-instructions /host-
     '    if [ "$HOST_UID" != "$CURRENT_UID" ]; then' \
     '        usermod -o -u "$HOST_UID" yolo 2>/dev/null || true' \
     '    fi' \
-    '    if [ "$HOST_UID" != "$CURRENT_UID" ] || [ "$HOST_GID" != "$CURRENT_GID" ]; then' \
-    '        chown -R yolo:yolo /home/yolo 2>/dev/null || true' \
-    '    fi' \
     'fi' \
+    '' \
+    '# Ensure yolo owns its home dir (named volume may have stale ownership)' \
+    'chown -R yolo:yolo /home/yolo 2>/dev/null || true' \
     '' \
     '# Apple container workaround: files are in /host-files/ instead of separate mounts' \
     '# Check YOLOBOX_HOST_FILES env var for the mount location' \
