@@ -1059,6 +1059,11 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 
 	args := []string{"run", "--rm"}
 
+	// Disable user namespace remapping so container UIDs match host UIDs.
+	// Without this, bind-mounted files appear as owned by nobody (65534)
+	// and the container user cannot write to the project directory.
+	args = append(args, "--userns=host")
+
 	// Add -it if explicitly interactive, or if stdin/stdout are both terminals
 	// This allows "yolobox run claude" to work interactively while still
 	// supporting piping (e.g., "echo foo | yolobox run cat")
