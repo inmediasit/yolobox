@@ -105,7 +105,9 @@ COPY ghostty.terminfo /tmp/ghostty.terminfo
 RUN tic -x -o /usr/share/terminfo /tmp/ghostty.terminfo && rm /tmp/ghostty.terminfo
 
 # Create yolo user with passwordless sudo
-RUN useradd -m -s /bin/bash yolo \
+# Remove default ubuntu user (UID 1000) first so yolo gets UID 1000
+RUN userdel -r ubuntu 2>/dev/null || true \
+    && useradd -m -s /bin/bash yolo \
     && echo "yolo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/yolo \
     && chmod 0440 /etc/sudoers.d/yolo
 
