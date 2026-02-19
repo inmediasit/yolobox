@@ -82,6 +82,7 @@ type Config struct {
 	GitConfig             bool     `toml:"git_config"`
 	GhToken               bool     `toml:"gh_token"`
 	CopyAgentInstructions bool     `toml:"copy_agent_instructions"`
+	IdeConfig             bool     `toml:"ide_config"`
 
 	// Runtime-only fields (not persisted to config file)
 	Setup bool `toml:"-"` // Run interactive setup before starting
@@ -331,6 +332,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  --git-config          Copy host git config to container")
 	fmt.Fprintln(os.Stderr, "  --gh-token            Forward GitHub CLI token (from gh auth token)")
 	fmt.Fprintln(os.Stderr, "  --copy-agent-instructions  Copy global agent instruction files")
+	fmt.Fprintln(os.Stderr, "  --ide                 Mount JetBrains IDE socket (for PyCharm/Claude Code integration)")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintf(os.Stderr, "%sCONFIG:%s\n", colorBold, colorReset)
 	fmt.Fprintln(os.Stderr, "  Global:  ~/.config/yolobox/config.toml")
@@ -376,6 +378,7 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 		gitConfig             bool
 		ghToken               bool
 		copyAgentInstructions bool
+		ideConfig             bool
 		setup                 bool
 		mounts                stringSliceFlag
 		envVars               stringSliceFlag
@@ -394,6 +397,7 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 	fs.BoolVar(&gitConfig, "git-config", false, "copy host git config to container")
 	fs.BoolVar(&ghToken, "gh-token", false, "forward GitHub CLI token (from gh auth token)")
 	fs.BoolVar(&copyAgentInstructions, "copy-agent-instructions", false, "copy agent instruction files (CLAUDE.md, GEMINI.md, AGENTS.md)")
+	fs.BoolVar(&ideConfig, "ide", false, "mount JetBrains IDE socket for Claude Code IDE integration")
 	fs.BoolVar(&setup, "setup", false, "run interactive setup before starting")
 	fs.Var(&mounts, "mount", "extra mount src:dst")
 	fs.Var(&envVars, "env", "environment variable KEY=value")
@@ -444,6 +448,9 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 	}
 	if copyAgentInstructions {
 		cfg.CopyAgentInstructions = true
+	}
+	if ideConfig {
+		cfg.IdeConfig = true
 	}
 	if setup {
 		cfg.Setup = true
@@ -562,6 +569,9 @@ func mergeConfig(dst *Config, src Config) {
 	if src.CopyAgentInstructions {
 		dst.CopyAgentInstructions = true
 	}
+	if src.IdeConfig {
+		dst.IdeConfig = true
+	}
 }
 
 func runShell(cfg Config) error {
@@ -648,6 +658,7 @@ func printConfig(cfg Config) error {
 	fmt.Printf("%sgit_config:%s %t\n", colorBold, colorReset, cfg.GitConfig)
 	fmt.Printf("%sgh_token:%s %t\n", colorBold, colorReset, cfg.GhToken)
 	fmt.Printf("%scopy_agent_instructions:%s %t\n", colorBold, colorReset, cfg.CopyAgentInstructions)
+	fmt.Printf("%side_config:%s %t\n", colorBold, colorReset, cfg.IdeConfig)
 	if len(cfg.Mounts) > 0 {
 		fmt.Printf("%smounts:%s\n", colorBold, colorReset)
 		for _, m := range cfg.Mounts {
@@ -856,7 +867,7 @@ func splitToolArgs(args []string) (yoloboxArgs, toolArgs []string) {
 		"ssh-agent": true, "readonly-project": true, "no-network": true,
 		"no-yolo": true, "scratch": true, "claude-config": true,
 		"gemini-config": true, "git-config": true, "gh-token": true,
-		"copy-agent-instructions": true, "setup": true, "mount": true,
+		"copy-agent-instructions": true, "ide": true, "setup": true, "mount": true,
 		"env": true, "h": true, "help": true,
 	}
 
@@ -1234,6 +1245,18 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 		copilotAgents := filepath.Join(home, ".copilot", "agents")
 		if info, err := os.Stat(copilotAgents); err == nil && info.IsDir() {
 			args = append(args, "-v", copilotAgents+":/host-agent-instructions/copilot/agents:ro")
+		}
+	}
+
+	// Mount JetBrains cache for IDE integration (Claude Code PyCharm plugin)
+	if cfg.IdeConfig {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		jetbrainsDir := filepath.Join(home, ".cache", "JetBrains")
+		if _, err := os.Stat(jetbrainsDir); err == nil {
+			args = append(args, "-v", jetbrainsDir+":/root/.cache/JetBrains")
 		}
 	}
 
