@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,19 +19,6 @@ jobs:
 
       - name: Build
         run: make build
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: yolobox
-          path: yolobox
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: yolobox
 
       - name: Create release and upload binary
         env:
