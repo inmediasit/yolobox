@@ -921,35 +921,34 @@ func splitToolArgs(args []string) (yoloboxArgs, toolArgs []string) {
 }
 
 func listIDEs() error {
-	xdgRuntime := os.Getenv("XDG_RUNTIME_DIR")
-	if xdgRuntime == "" {
-		xdgRuntime = fmt.Sprintf("/run/user/%d", os.Getuid())
-	}
-
-	entries, err := os.ReadDir(xdgRuntime)
+	hostHome, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("cannot read %s: %w", xdgRuntime, err)
+		return fmt.Errorf("cannot determine home directory: %w", err)
 	}
 
-	var socks []string
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasPrefix(name, "jb.") && strings.HasSuffix(name, ".sock") {
-			socks = append(socks, filepath.Join(xdgRuntime, name))
-		}
-	}
-
-	if len(socks) == 0 {
-		fmt.Fprintf(os.Stderr, "No JetBrains IDE sockets found in %s\n", xdgRuntime)
-		fmt.Fprintln(os.Stderr, "Make sure a JetBrains IDE (PyCharm, IntelliJ, etc.) is running.")
+	ideDir := filepath.Join(hostHome, ".claude", "ide")
+	entries, err := os.ReadDir(ideDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "No IDE lock files found in %s\n", ideDir)
+		fmt.Fprintln(os.Stderr, "Make sure a JetBrains IDE is running with the Claude Code plugin installed.")
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "Found %d JetBrains IDE socket(s) in %s:\n", len(socks), xdgRuntime)
-	for _, sock := range socks {
-		fmt.Fprintf(os.Stderr, "  %s%s%s\n", colorCyan, sock, colorReset)
+	var found int
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".lock") {
+			fmt.Fprintf(os.Stderr, "  %s%s%s\n", colorCyan, filepath.Join(ideDir, entry.Name()), colorReset)
+			found++
+		}
 	}
-	fmt.Fprintf(os.Stderr, "\nUse %s--ide%s to mount these into the container.\n", colorBold, colorReset)
+
+	if found == 0 {
+		fmt.Fprintf(os.Stderr, "No IDE lock files found in %s\n", ideDir)
+		fmt.Fprintln(os.Stderr, "Make sure a JetBrains IDE is running with the Claude Code plugin installed.")
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "\nFound %d IDE(s). Use %s--ide%s to mount into the container.\n", found, colorBold, colorReset)
 	return nil
 }
 
@@ -1284,27 +1283,18 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 		}
 	}
 
-	// Mount JetBrains IDE sockets for Claude Code IDE integration (PyCharm plugin)
-	// Claude Code discovers IDEs via jb.*.sock files in XDG_RUNTIME_DIR
+	// Mount JetBrains IDE support for Claude Code IDE integration (PyCharm plugin)
+	// The JetBrains Claude Code plugin writes ~/.claude/ide/<port>.lock with the
+	// WebSocket MCP server port and auth token. Claude Code reads these lock files
+	// to discover IDEs. --network=host (set above) is required for the WebSocket
+	// connection to reach localhost:PORT on the host.
 	if cfg.IdeConfig {
-		xdgRuntime := os.Getenv("XDG_RUNTIME_DIR")
-		if xdgRuntime == "" {
-			xdgRuntime = fmt.Sprintf("/run/user/%d", os.Getuid())
-		}
-		entries, err := os.ReadDir(xdgRuntime)
+		hostHome, err := os.UserHomeDir()
 		if err == nil {
-			var found int
-			for _, entry := range entries {
-				name := entry.Name()
-				if strings.HasPrefix(name, "jb.") && strings.HasSuffix(name, ".sock") {
-					sockPath := filepath.Join(xdgRuntime, name)
-					args = append(args, "-v", sockPath+":"+sockPath)
-					found++
-				}
-			}
-			if found > 0 {
-				args = append(args, "-e", "XDG_RUNTIME_DIR="+xdgRuntime)
-			}
+			ideDir := filepath.Join(hostHome, ".claude", "ide")
+			// Create the directory if the plugin hasn't run yet
+			_ = os.MkdirAll(ideDir, 0o755)
+			args = append(args, "-v", ideDir+":/home/yolo/.claude/ide:ro")
 		}
 	}
 
@@ -1346,9 +1336,17 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 
 	// Network configuration
 	if cfg.NoNetwork {
+		if cfg.IdeConfig {
+			warn("--ide requires host networking; --no-network will prevent IDE detection")
+		}
 		args = append(args, "--network", "none")
 	} else if cfg.Network != "" {
 		args = append(args, "--network", cfg.Network)
+	} else if cfg.IdeConfig {
+		// IDE detection requires TCP access to the host's JetBrains plugin server.
+		// Without host networking, localhost inside the container is isolated and
+		// Claude Code cannot reach the plugin (same issue as WSL2 NAT networking).
+		args = append(args, "--network", "host")
 	}
 
 	args = append(args, cfg.Image)
