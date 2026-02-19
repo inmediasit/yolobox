@@ -101,6 +101,7 @@ yolobox help                # Show help
 | `--git-config` | Copy host `~/.gitconfig` into container |
 | `--gh-token` | Forward GitHub CLI token (extracts from keychain via `gh auth token`) |
 | `--copy-agent-instructions` | Copy global agent instruction files (see below) |
+| `--ide` | Mount JetBrains IDE socket for Claude Code IDE integration (see below) |
 
 > **Networking:** By default, yolobox uses Docker's bridge network (internet access, no container DNS). Use `--network <name>` to join a docker compose network and access services by name. Use `--no-network` for complete isolation.
 
@@ -147,6 +148,20 @@ Files copied (if they exist on your host):
 **Note:** This only copies global instruction files, not full configs (credentials, settings, history). For Claude's full config, use `--claude-config` instead.
 
 You can also set `copy_agent_instructions = true` in your config file for persistent use.
+
+### JetBrains IDE Integration
+
+The `--ide` flag enables Claude Code's [JetBrains IDE integration](https://docs.anthropic.com/en/docs/claude-code/ide-integrations) (PyCharm, IntelliJ, etc.) when running inside the container.
+
+The Claude Code PyCharm plugin exposes a Unix socket under `~/.cache/JetBrains/<version>/`. With `--ide`, yolobox bind-mounts your host `~/.cache/JetBrains/` directory into the container at `/root/.cache/JetBrains/`, making the socket accessible to Claude Code running inside the sandbox.
+
+```bash
+yolobox claude --ide    # Claude Code can talk to your running PyCharm
+```
+
+The mount is skipped silently if `~/.cache/JetBrains/` does not exist on the host.
+
+You can also set `ide_config = true` in your config file for persistent use.
 
 ### Auto-Forwarded Environment Variables
 
