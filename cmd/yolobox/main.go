@@ -256,6 +256,8 @@ func runCmd() error {
 			return fmt.Errorf("unexpected args: %v", rest)
 		}
 		return printConfig(cfg)
+	case "ide":
+		return listIDEs()
 	case "reset":
 		return resetVolumes(args[1:])
 	case "uninstall":
@@ -305,6 +307,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  yolobox setup               Configure yolobox settings")
 	fmt.Fprintln(os.Stderr, "  yolobox upgrade             Upgrade binary and pull latest image")
 	fmt.Fprintln(os.Stderr, "  yolobox config              Print resolved configuration")
+	fmt.Fprintln(os.Stderr, "  yolobox ide                 List connected JetBrains IDE sockets")
 	fmt.Fprintln(os.Stderr, "  yolobox reset --force       Remove named volumes (fresh start)")
 	fmt.Fprintln(os.Stderr, "  yolobox uninstall --force   Uninstall yolobox completely")
 	fmt.Fprintln(os.Stderr, "  yolobox version             Show version info")
@@ -917,6 +920,39 @@ func splitToolArgs(args []string) (yoloboxArgs, toolArgs []string) {
 	return yoloboxArgs, nil
 }
 
+func listIDEs() error {
+	xdgRuntime := os.Getenv("XDG_RUNTIME_DIR")
+	if xdgRuntime == "" {
+		xdgRuntime = fmt.Sprintf("/run/user/%d", os.Getuid())
+	}
+
+	entries, err := os.ReadDir(xdgRuntime)
+	if err != nil {
+		return fmt.Errorf("cannot read %s: %w", xdgRuntime, err)
+	}
+
+	var socks []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, "jb.") && strings.HasSuffix(name, ".sock") {
+			socks = append(socks, filepath.Join(xdgRuntime, name))
+		}
+	}
+
+	if len(socks) == 0 {
+		fmt.Fprintf(os.Stderr, "No JetBrains IDE sockets found in %s\n", xdgRuntime)
+		fmt.Fprintln(os.Stderr, "Make sure a JetBrains IDE (PyCharm, IntelliJ, etc.) is running.")
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "Found %d JetBrains IDE socket(s) in %s:\n", len(socks), xdgRuntime)
+	for _, sock := range socks {
+		fmt.Fprintf(os.Stderr, "  %s%s%s\n", colorCyan, sock, colorReset)
+	}
+	fmt.Fprintf(os.Stderr, "\nUse %s--ide%s to mount these into the container.\n", colorBold, colorReset)
+	return nil
+}
+
 func resetVolumes(args []string) error {
 	fs := flag.NewFlagSet("reset", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -1248,15 +1284,27 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 		}
 	}
 
-	// Mount JetBrains cache for IDE integration (Claude Code PyCharm plugin)
+	// Mount JetBrains IDE sockets for Claude Code IDE integration (PyCharm plugin)
+	// Claude Code discovers IDEs via jb.*.sock files in XDG_RUNTIME_DIR
 	if cfg.IdeConfig {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
+		xdgRuntime := os.Getenv("XDG_RUNTIME_DIR")
+		if xdgRuntime == "" {
+			xdgRuntime = fmt.Sprintf("/run/user/%d", os.Getuid())
 		}
-		jetbrainsDir := filepath.Join(home, ".cache", "JetBrains")
-		if _, err := os.Stat(jetbrainsDir); err == nil {
-			args = append(args, "-v", jetbrainsDir+":/home/yolo/.cache/JetBrains")
+		entries, err := os.ReadDir(xdgRuntime)
+		if err == nil {
+			var found int
+			for _, entry := range entries {
+				name := entry.Name()
+				if strings.HasPrefix(name, "jb.") && strings.HasSuffix(name, ".sock") {
+					sockPath := filepath.Join(xdgRuntime, name)
+					args = append(args, "-v", sockPath+":"+sockPath)
+					found++
+				}
+			}
+			if found > 0 {
+				args = append(args, "-e", "XDG_RUNTIME_DIR="+xdgRuntime)
+			}
 		}
 	}
 
