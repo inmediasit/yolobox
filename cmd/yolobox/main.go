@@ -1256,7 +1256,7 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 		}
 		jetbrainsDir := filepath.Join(home, ".cache", "JetBrains")
 		if _, err := os.Stat(jetbrainsDir); err == nil {
-			args = append(args, "-v", jetbrainsDir+":/root/.cache/JetBrains")
+			args = append(args, "-v", jetbrainsDir+":/home/yolo/.cache/JetBrains")
 		}
 	}
 

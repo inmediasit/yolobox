@@ -153,7 +153,7 @@ You can also set `copy_agent_instructions = true` in your config file for persis
 
 The `--ide` flag enables Claude Code's [JetBrains IDE integration](https://docs.anthropic.com/en/docs/claude-code/ide-integrations) (PyCharm, IntelliJ, etc.) when running inside the container.
 
-The Claude Code PyCharm plugin exposes a Unix socket under `~/.cache/JetBrains/<version>/`. With `--ide`, yolobox bind-mounts your host `~/.cache/JetBrains/` directory into the container at `/root/.cache/JetBrains/`, making the socket accessible to Claude Code running inside the sandbox.
+The Claude Code PyCharm plugin exposes a Unix socket under `~/.cache/JetBrains/<version>/`. With `--ide`, yolobox bind-mounts your host `~/.cache/JetBrains/` directory into the container at `/home/yolo/.cache/JetBrains/`, making the socket accessible to Claude Code running inside the sandbox.
 
 ```bash
 yolobox claude --ide    # Claude Code can talk to your running PyCharm
