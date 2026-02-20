@@ -82,6 +82,7 @@ type Config struct {
 	GitConfig             bool     `toml:"git_config"`
 	GhToken               bool     `toml:"gh_token"`
 	CopyAgentInstructions bool     `toml:"copy_agent_instructions"`
+	IdeConfig             bool     `toml:"ide_config"`
 
 	// Runtime-only fields (not persisted to config file)
 	Setup bool `toml:"-"` // Run interactive setup before starting
@@ -255,6 +256,8 @@ func runCmd() error {
 			return fmt.Errorf("unexpected args: %v", rest)
 		}
 		return printConfig(cfg)
+	case "ide":
+		return listIDEs()
 	case "reset":
 		return resetVolumes(args[1:])
 	case "uninstall":
@@ -304,6 +307,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  yolobox setup               Configure yolobox settings")
 	fmt.Fprintln(os.Stderr, "  yolobox upgrade             Upgrade binary and pull latest image")
 	fmt.Fprintln(os.Stderr, "  yolobox config              Print resolved configuration")
+	fmt.Fprintln(os.Stderr, "  yolobox ide                 List connected JetBrains IDE sockets")
 	fmt.Fprintln(os.Stderr, "  yolobox reset --force       Remove named volumes (fresh start)")
 	fmt.Fprintln(os.Stderr, "  yolobox uninstall --force   Uninstall yolobox completely")
 	fmt.Fprintln(os.Stderr, "  yolobox version             Show version info")
@@ -331,6 +335,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  --git-config          Copy host git config to container")
 	fmt.Fprintln(os.Stderr, "  --gh-token            Forward GitHub CLI token (from gh auth token)")
 	fmt.Fprintln(os.Stderr, "  --copy-agent-instructions  Copy global agent instruction files")
+	fmt.Fprintln(os.Stderr, "  --ide                 Mount JetBrains IDE socket (for PyCharm/Claude Code integration)")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintf(os.Stderr, "%sCONFIG:%s\n", colorBold, colorReset)
 	fmt.Fprintln(os.Stderr, "  Global:  ~/.config/yolobox/config.toml")
@@ -376,6 +381,7 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 		gitConfig             bool
 		ghToken               bool
 		copyAgentInstructions bool
+		ideConfig             bool
 		setup                 bool
 		mounts                stringSliceFlag
 		envVars               stringSliceFlag
@@ -394,6 +400,7 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 	fs.BoolVar(&gitConfig, "git-config", false, "copy host git config to container")
 	fs.BoolVar(&ghToken, "gh-token", false, "forward GitHub CLI token (from gh auth token)")
 	fs.BoolVar(&copyAgentInstructions, "copy-agent-instructions", false, "copy agent instruction files (CLAUDE.md, GEMINI.md, AGENTS.md)")
+	fs.BoolVar(&ideConfig, "ide", false, "mount JetBrains IDE socket for Claude Code IDE integration")
 	fs.BoolVar(&setup, "setup", false, "run interactive setup before starting")
 	fs.Var(&mounts, "mount", "extra mount src:dst")
 	fs.Var(&envVars, "env", "environment variable KEY=value")
@@ -444,6 +451,9 @@ func parseBaseFlags(name string, args []string, projectDir string) (Config, []st
 	}
 	if copyAgentInstructions {
 		cfg.CopyAgentInstructions = true
+	}
+	if ideConfig {
+		cfg.IdeConfig = true
 	}
 	if setup {
 		cfg.Setup = true
@@ -562,6 +572,9 @@ func mergeConfig(dst *Config, src Config) {
 	if src.CopyAgentInstructions {
 		dst.CopyAgentInstructions = true
 	}
+	if src.IdeConfig {
+		dst.IdeConfig = true
+	}
 }
 
 func runShell(cfg Config) error {
@@ -648,6 +661,7 @@ func printConfig(cfg Config) error {
 	fmt.Printf("%sgit_config:%s %t\n", colorBold, colorReset, cfg.GitConfig)
 	fmt.Printf("%sgh_token:%s %t\n", colorBold, colorReset, cfg.GhToken)
 	fmt.Printf("%scopy_agent_instructions:%s %t\n", colorBold, colorReset, cfg.CopyAgentInstructions)
+	fmt.Printf("%side_config:%s %t\n", colorBold, colorReset, cfg.IdeConfig)
 	if len(cfg.Mounts) > 0 {
 		fmt.Printf("%smounts:%s\n", colorBold, colorReset)
 		for _, m := range cfg.Mounts {
@@ -856,7 +870,7 @@ func splitToolArgs(args []string) (yoloboxArgs, toolArgs []string) {
 		"ssh-agent": true, "readonly-project": true, "no-network": true,
 		"no-yolo": true, "scratch": true, "claude-config": true,
 		"gemini-config": true, "git-config": true, "gh-token": true,
-		"copy-agent-instructions": true, "setup": true, "mount": true,
+		"copy-agent-instructions": true, "ide": true, "setup": true, "mount": true,
 		"env": true, "h": true, "help": true,
 	}
 
@@ -904,6 +918,38 @@ func splitToolArgs(args []string) (yoloboxArgs, toolArgs []string) {
 	}
 
 	return yoloboxArgs, nil
+}
+
+func listIDEs() error {
+	hostHome, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot determine home directory: %w", err)
+	}
+
+	ideDir := filepath.Join(hostHome, ".claude", "ide")
+	entries, err := os.ReadDir(ideDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "No IDE lock files found in %s\n", ideDir)
+		fmt.Fprintln(os.Stderr, "Make sure a JetBrains IDE is running with the Claude Code plugin installed.")
+		return nil
+	}
+
+	var found int
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".lock") {
+			fmt.Fprintf(os.Stderr, "  %s%s%s\n", colorCyan, filepath.Join(ideDir, entry.Name()), colorReset)
+			found++
+		}
+	}
+
+	if found == 0 {
+		fmt.Fprintf(os.Stderr, "No IDE lock files found in %s\n", ideDir)
+		fmt.Fprintln(os.Stderr, "Make sure a JetBrains IDE is running with the Claude Code plugin installed.")
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "\nFound %d IDE(s). Use %s--ide%s to mount into the container.\n", found, colorBold, colorReset)
+	return nil
 }
 
 func resetVolumes(args []string) error {
@@ -1232,6 +1278,21 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 		}
 	}
 
+	// Mount JetBrains IDE support for Claude Code IDE integration (PyCharm plugin)
+	// The JetBrains Claude Code plugin writes ~/.claude/ide/<port>.lock with the
+	// WebSocket MCP server port and auth token. Claude Code reads these lock files
+	// to discover IDEs. --network=host (set above) is required for the WebSocket
+	// connection to reach localhost:PORT on the host.
+	if cfg.IdeConfig {
+		hostHome, err := os.UserHomeDir()
+		if err == nil {
+			ideDir := filepath.Join(hostHome, ".claude", "ide")
+			// Create the directory if the plugin hasn't run yet
+			_ = os.MkdirAll(ideDir, 0o755)
+			args = append(args, "-v", ideDir+":/home/yolo/.claude/ide:ro")
+		}
+	}
+
 	// For Apple container: create temp dir with collected files and mount it
 	if appleContainer && len(appleContainerFiles) > 0 {
 		tmpDir, err := prepareFileMountDir(appleContainerFiles)
@@ -1270,9 +1331,17 @@ func buildRunArgs(cfg Config, projectDir string, command []string, interactive b
 
 	// Network configuration
 	if cfg.NoNetwork {
+		if cfg.IdeConfig {
+			warn("--ide requires host networking; --no-network will prevent IDE detection")
+		}
 		args = append(args, "--network", "none")
 	} else if cfg.Network != "" {
 		args = append(args, "--network", cfg.Network)
+	} else if cfg.IdeConfig {
+		// IDE detection requires TCP access to the host's JetBrains plugin server.
+		// Without host networking, localhost inside the container is isolated and
+		// Claude Code cannot reach the plugin (same issue as WSL2 NAT networking).
+		args = append(args, "--network", "host")
 	}
 
 	args = append(args, cfg.Image)
